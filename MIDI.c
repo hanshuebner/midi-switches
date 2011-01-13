@@ -88,7 +88,9 @@ int main(void)
     }
 }
 
-uint8_t idle_mask;              /* holds idle (non-pressed) state of switches */
+/* holds idle (non-pressed) state of switches */
+uint8_t idle_mask_b;
+uint8_t idle_mask_d;
 
 /** Configures the board hardware and chip peripherals for the demo's functionality. */
 void SetupHardware(void)
@@ -102,14 +104,17 @@ void SetupHardware(void)
 
   /* Hardware Initialization */
   DDRB = 0;
-  PORTB = 0x0F;                 /* pullups */
+  PORTB = 0xFF;                 /* pullups */
+  DDRD = 0;
+  PORTD = 0xFF;                 /* pullups */
   LEDs_Init();
   USB_Init();
-  _delay_ms(100);              /* debounce */
-  idle_mask = PINB;
+  _delay_ms(100);              /* wait for inputs to settle */
+  idle_mask_b = PINB;
+  idle_mask_d = PIND;
 }
 
-uint8_t channel = 1;
+uint8_t channel = 0;
 
 void
 SendMIDICC(uint8_t onOff, uint8_t number)
@@ -127,32 +132,39 @@ SendMIDICC(uint8_t onOff, uint8_t number)
   MIDI_Device_Flush(&Keyboard_MIDI_Interface);
 }
 
+void
+process_port_changes(uint8_t input_status, uint8_t previous_input_status, uint8_t cc_offset)
+{
+  uint8_t input_changes = input_status ^ previous_input_status;
+  uint8_t mask = 1;
+  
+  for (uint8_t i = 0; i < 8; i++) {
+    if (input_changes & mask) {
+      SendMIDICC(input_status & mask, cc_offset + i);
+    }
+    mask <<= 1;
+  }
+}
+
 /** Checks for changes in the position of the board joystick, sending MIDI events to the host upon each change. */
 void CheckInputs(void)
 {
-  static uint8_t PrevInputStatus;
+  static uint8_t previous_input_status_b;
+  static uint8_t previous_input_status_d;
+  uint8_t input_status_b = PINB ^ idle_mask_b;
+  uint8_t input_status_d = PIND ^ idle_mask_d;
+  
+  process_port_changes(input_status_b, previous_input_status_b, 0);
+  process_port_changes(input_status_d, previous_input_status_d, 8);
 
-  uint8_t InputStatus  = PINB ^ idle_mask;
-  uint8_t InputChanges = InputStatus ^ PrevInputStatus;
-
-  if (InputChanges & 0x01) {
-    SendMIDICC(InputStatus & 0x01, 0);
-  }
-  if (InputChanges & 0x02) {
-    SendMIDICC(InputStatus & 0x02, 1);
-  }
-  if (InputChanges & 0x04) {
-    SendMIDICC(InputStatus & 0x04, 2);
-  }
-  if (InputChanges & 0x08) {
-    SendMIDICC(InputStatus & 0x08, 3);
-  }
-  if (InputChanges) {
+  if (input_status_b != previous_input_status_b
+      || input_status_d != previous_input_status_d) {
     _delay_ms(30);              /* debounce */
+    previous_input_status_b = input_status_b;
+    previous_input_status_d = input_status_d;
   }
-
-  PrevInputStatus = InputStatus;
 }
+
 
 /** Event handler for the library USB Connection event. */
 void EVENT_USB_Device_Connect(void)

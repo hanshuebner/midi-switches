@@ -8,3 +8,5 @@
 *.map
 *.sym
 *.lss
+*.lst
+.dep
